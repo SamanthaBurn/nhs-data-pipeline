@@ -1,0 +1,6 @@
+# Ignore all .xls and .xlsx files
+*.xls
+*.xlsx
+
+# Ignore the entire rawdata/ directory
+rawdata/
