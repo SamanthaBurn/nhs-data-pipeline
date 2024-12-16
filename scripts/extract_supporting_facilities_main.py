@@ -5,7 +5,9 @@
 
 ##########################################
 
+### LIBRARIES
 
+# pip install selenium
 import os
 import time
 from urllib.parse import urljoin
@@ -13,33 +15,10 @@ from urllib.request import urlopen, Request, URLError
 from bs4 import BeautifulSoup
 import requests
 from pathlib import Path
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.options import Options
-import mimetypes
-
-
+from extract_supporting_facilities_webarchive import handle_webarchive_download # webarchive functionality
+    
 
 ### FUNCTIONS
-
-def setup_chrome_driver(download_dir):
-    """It is necessary to have a Chromedriver for the webarchived files,
-    that use Javascript to be downloaded in the browser"""
-    chrome_options = Options()
-    chrome_options.add_argument('--headless')
-    chrome_options.add_experimental_option("prefs", {
-        "profile.default_content_settings.popups": 0,
-        "download.default_directory": download_dir, 
-        "download.prompt_for_download": False,
-        "download.directory_upgrade": True,
-        "plugins.always_open_pdf_externally": True,
-        "safebrowsing_for_trusted_sources_enabled": False,
-        "safebrowsing.enabled": False # allows all downloads
-    })    
-    driver_path = ChromeDriverManager().install()
-    service = Service(driver_path)
-    return webdriver.Chrome(service=service, options=chrome_options)
 
 def get_file_extension(url, original_extension):
     """Extract the correct file extension from URL or original extension."""
@@ -86,70 +65,6 @@ def check_downloaded_file(download_dir):
         print("No files downloaded in the directory.")
         return None
 
-"""
-def check_and_rename_downloaded_file(download_dir, expected_filename):
-    try:
-        files = [os.path.join(download_dir, f) for f in os.listdir(download_dir)]
-        latest_file = max(files, key=os.path.getctime)
-        print(f"Latest downloaded file: {latest_file}")
-        
-        # Determine the extension from the latest file
-        _, latest_ext = os.path.splitext(latest_file)
-        
-        # Determine expected extension from the expected filename or infer from the file MIME type
-        expected_ext = os.path.splitext(expected_filename)[1]
-        if not expected_ext:  # If no extension in expected, infer from the MIME type
-            mime_type, _ = mimetypes.guess_type(latest_file)
-            expected_ext = mimetypes.guess_extension(mime_type) if mime_type else latest_ext
-
-        # Rename the file if the extension is missing or incorrect
-        if latest_ext.lower() != expected_ext.lower():
-            new_filename = f"{os.path.splitext(expected_filename)[0]}{expected_ext}"
-            new_file_path = os.path.join(download_dir, new_filename)
-            os.rename(latest_file, new_file_path)
-            print(f"Renamed to: {new_file_path}")
-            return new_file_path
-        return latest_file
-    except ValueError:
-        print("No files downloaded in the directory.")
-        return None
-
-
-
-
-def download_file(url, filename):
-    expected_filename = filename
-    download_dir = os.path.dirname(expected_filename)
-    try:
-        if 'webarchive' or 'web.archive' in url:
-            print('This is likely a webarchive URL, please inspect file URL to confirm this.')
-            driver = setup_chrome_driver(download_dir)
-            driver.get(url)
-            time.sleep(10)  # Adjust time for file to download
-            driver.quit()
-            latest_file = check_downloaded_file(download_dir)
-            if latest_file and os.path.basename(latest_file) == os.path.basename(expected_filename):
-                print(f"Successfully downloaded {filename}")
-                return True
-            else:
-                print("File may not have downloaded correctly or filename differs.")
-                print("Renaming file to correct filename")
-                renamed_file = check_and_rename_downloaded_file(download_dir, os.path.basename(filename))
-                return renamed_file is not None
-        else:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-            print("Non-webarchive URL, download not attempted with Selenium.")
-            response = requests.get(url, headers=headers, allow_redirects=True)
-            if response.status_code == 200:
-                with open(filename, 'wb') as f:
-                    f.write(response.content)
-        return True
-    except Exception as e:
-        print(f"Error downloading {url}: {e}")
-        return False
-"""
 
 def download_file(url, filename):
     """Download file using Selenium for complex JavaScript-based redirection or direct download."""
@@ -157,12 +72,7 @@ def download_file(url, filename):
     try:
         if 'webarchive' in url or 'web.archive' in url:
             print('This is likely a webarchive URL, using Selenium library...')
-            driver = setup_chrome_driver(download_dir)
-            driver.get(url)
-            time.sleep(10)
-            driver.quit()
-            
-            latest_file = check_downloaded_file(download_dir)
+            latest_file = handle_webarchive_download(url, download_dir, check_downloaded_file) # calling function from different file
             if latest_file:
                 os.rename(latest_file, filename)
                 print(f"Successfully downloaded and renamed to {filename}")
@@ -222,7 +132,8 @@ def main():
     os.makedirs(RAW_DATA_DIR, exist_ok=True)
     # Defining URL with data
     dataurl = "https://www.england.nhs.uk/statistics/statistical-work-areas/cancelled-elective-operations/supporting-facilities-data/"
-
+    failed_downloads = [] # list of failed downloads
+    
     try:
         print("Reading webpage...")
         page = urlopen(Request(dataurl, headers={'User-Agent': 'Mozilla/5.0'}))
@@ -268,8 +179,19 @@ def main():
                 print(f"Successfully downloaded {filename}\n")
             else:
                 print(f"Failed to download {filename}\n")
+                failed_downloads.append((id, filename, url))
             time.sleep(1)
-        
+            
+        # Failed downloads
+        if failed_downloads:
+            print("-" * 50)
+            print("\nDatasets that could not be downloaded:")             
+            for id, filename, url in failed_downloads:
+                print(f"ID: {id}")
+                print(f"Filename: {filename}")
+                print(f"URL: {url}\n")
+ 
+    # Errors
     except URLError as e:
         print(f"Network error: {e}")
     except Exception as e:
