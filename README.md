@@ -1,6 +1,16 @@
 # NHS hospital data pipeline
 Here you'll find code to extract and process NHS public hospital data. The NHS releases a lot of great data, but this is often hard for researchers to work with since it is fragmented across many different websites with non-standard file and variable names. The purpose of this repo is to allow researchers to quickly and easily produce hospital-level datasets across multiple years.
 
+## What is in here already
+- extract_supporting_facilities_main.py Pulls all the data files [Supporting facilities data](https://www.england.nhs.uk/statistics/statistical-work-areas/cancelled-elective-operations/supporting-facilities-data/) and saves it in rawdata/supporting-facilities/
+- build_datasets_main.py Merges the raw data files into a hospital*time series and saves this in data/
+
+## What to do if you want to add a new series to the repo
+- Make a new branch
+- Make a .py script for extracting all the data from the NHS page and saving in a new
+- Make a .py script for merging all the raw data files and producing a hospital*time dataset
+- The repo is set up so that only the derived dataset is tracked by the repo. The user can download all the raw data to their local copy if they want to, but the rawdata/ folder is ignored in the git.
+
 ## What I'm hoping for eventually
 - User clones copy of the dataset that contains the extracted public NHS datasets. (If the file sizes get too big, we might need to rethink storage)
 - User specifies inputs (variable names, first year, last year, data at the financial year/calendar year/quarter/month level)
