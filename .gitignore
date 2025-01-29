@@ -19,7 +19,7 @@ rawdata/
 *.Rhistory
 *.Rapp.history
 *Rplots.pdf
-*.DS_Store
+.DS_Store
 *.lof
 *.lot
 *.svn
