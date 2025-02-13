@@ -443,9 +443,82 @@ beds_1024 <- join(overnight_beds_1024_cleaned, day_beds_1024_cleaned) |>
 
 write.csv(beds_1024, file.path(getwd(), "data/available-and-occupied-beds/overnight_day_beds_2010_24_clean.csv"))
 
-# LINKING AND OUTPUTTING ALL BEDS DATA 2000 - 2024 -----------------------------
+# LINKING BEDS DATA 2000 - 2024, ACCOUNTING FOR ORG CHANGES AND OUTPUTTING------
 beds_0024 <- rbind(beds_1024, beds_0010, fill = TRUE) |> 
   arrange(org_code, year, quarter)
+
+#loading trust_lookup_uncomplicated (for now)
+trust_lookup_uncomplicated <- read.csv("data/org-changes/trust_lookup_uncomplicated_changes.csv")
+
+#getting name file, as names will be taken out temporarily 
+name_code_lookup <- beds_0024 |> 
+  select(org_code, org_name) |> 
+  unique() |> 
+  group_by(org_code) |> 
+  slice(1)
+
+beds_0024 <- beds_0024 |> 
+  select(-org_name) #taking out names temporarily
+beds_0024$year <- as.numeric(beds_0024$year)
+
+#separating out the affected trusts from beds 
+all_affected_trusts <- unique(c(trust_lookup_uncomplicated$old_code, trust_lookup_uncomplicated$final_code))
+beds_0024_orgchanges <- beds_0024 |> 
+  filter(org_code %in% all_affected_trusts)
+beds_0024 <- beds_0024 |> 
+  filter(org_code %!in% all_affected_trusts)
+
+#linking on the changed trusts 
+setnames(trust_lookup_uncomplicated, "old_code", "org_code")
+beds_0024_orgchanges <- join(beds_0024_orgchanges, trust_lookup_uncomplicated)
+
+#getting indicator of period where something changed - can merge this back on later
+change_indicator <- beds_0024_orgchanges |> 
+  filter(!is.na(final_code)) |> 
+  group_by(org_code, final_code) |> 
+  mutate(change_year = max(year)) |> 
+  mutate(quarter = ifelse(!is.na(quarter), str_extract(quarter, "[0-9]+"), quarter)) |> 
+  mutate(change_quarter = ifelse(year == change_year & !is.na(quarter), max(as.numeric(quarter), na.rm = TRUE), NA)) |> 
+  fill(change_quarter, .direction = "up") |> 
+  ungroup() |> 
+  select(final_code, change_year, change_quarter, experiences_split) |> 
+  unique() |> 
+  rename(year = change_year, 
+         quarter = change_quarter, 
+         org_code = final_code) |> 
+  mutate(quarter = ifelse(!is.na(quarter), paste0("Q", quarter), quarter))
+
+#changing names to final name 
+beds_0024_orgchanges <- beds_0024_orgchanges |> 
+  mutate(org_code = ifelse(!is.na(final_code), final_code, org_code))
+
+#aggregating by trust, returning NA still if ALL values are NA 
+beds_0024_orgchanges <- beds_0024_orgchanges |> 
+  group_by(year, quarter, org_code, period_end) |> 
+  summarise(across(ends_with(c("available", "s_occupied")), ~ifelse(all(is.na(.)), NA, sum(., na.rm=TRUE))))
+
+#adding the percent_occupied variables back in 
+for (category in c("total_", "general_acute_", "learn_disabil_", "maternity_", "mental_illness_")) {
+  for (type in c("day_", "on_")) {
+   available_var <- paste0(category, type, "beds_available")
+   occupied_var <- paste0(category, type, "beds_occupied")
+   percent_var <- paste0(category, type, "beds_percent_occupied")
+    
+   beds_0024_orgchanges <- beds_0024_orgchanges |> 
+     mutate(!!percent_var := !!sym(occupied_var) / !!sym(available_var)) |> 
+     mutate(!!percent_var := ifelse(!!sym(percent_var) == "NaN", NA, !!sym(percent_var)))
+  }
+}
+
+#linking all back together 
+beds_0024 <- rbind(beds_0024, beds_0024_orgchanges) |> 
+  arrange(org_code, year, quarter) 
+
+#merging on information on changes and names 
+beds_0024 <- join(beds_0024, name_code_lookup)
+beds_0024 <- join(beds_0024, change_indicator)|> 
+  rename(org_change = experiences_split) |> 
+  mutate(org_change = ifelse(!is.na(org_change), 1, 0))
 
 write.csv(beds_0024, file.path(getwd(), "data/available-and-occupied-beds/overnight_day_beds_2000_24_clean.csv"))
 
