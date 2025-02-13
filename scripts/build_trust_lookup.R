@@ -51,7 +51,11 @@ successor_changes <- successor_changes |>
   filter(year(succession_effective_date) >= 2000 & year(succession_effective_date) <= 2018) |> 
   filter(str_length(old_code) == 3)
 
-# DEALING WITH SUCCESSIVE CHANGES ----------------------------------------------
+# LOADING ORG CHANGE DATA  -----------------------------------------------------
+all_org_changes <- read.csv("data/org_changes/all_org_changes_paths_2000_2018.csv")
+
+# CREATE MAPPING OF ANY CODE TO FINAL CODE IN 2018 -----------------------------
+  #this gives lookup of any code to their final code 
 all_codes <- unique(c(successor_changes$old_code, successor_changes$new_code))
 non_final_codes <- all_codes[all_codes %in% successor_changes$old_code]
 
@@ -65,26 +69,45 @@ while (length(repl) > 0) #as long as there are still non-final codes in mapping$
 { 
   #build vector to find the true next successor for a new code
   repl_v <- sapply(repl, function(x) successor_changes$new_code[successor_changes$old_code == mapping$final_code[x]])
-  
+  #repl_date <- sapply(repl, function(x) successor_changes$succession_effective_date[successor_changes$old_code == mapping$final_code[x]])
+
   #replace non-final codes with the actual next successor
   mapping$final_code[repl] <- repl_v
+  #mapping$latest_date[repl] <- lapply(repl_date, function(x) as.Date(x))
+  
+  #new column
+   mapping <- mapping |> 
+     unnest(final_code)
   
   #indices of those trusts which are still not final 
   repl <- which(mapping$final_code %in% non_final_codes)
 }
 
-#removing rows that map to themselves 
+#removing rows that map to themselves and duplicates
 mapping <- mapping |> 
-  filter(old_code != final_code)
+  filter(old_code != final_code) |> 
+  distinct()
 mapping <- data.frame(mapping)
 
-#CHECKING SPLITTING ORGANISATIONS ----------------------------------------------
-split_orgs <- unique(mapping |> filter(str_length(final_code) > 3) |> pull(old_code))
+#IDENTIFYING UNPROBLEMATIC CHANGES ---------------------------------------------
+  #for this we need to use those paths which are non problematic in all_org_changes
+unproblematic_changes <- all_org_changes |> 
+  filter(part_of_complicated_path == 0) |> 
+  select(experiences_split, final_code) |> 
+  unique()
 
-beds0024 <- read.csv("data/available-and-occupied-beds/overnight_day_beds_2000_24_clean.csv")
-trusts <- unique(beds0024$org_code)
+mapping <- join(mapping, unproblematic_changes) |> 
+  mutate(problematic = ifelse(is.na(experiences_split), 1, 0))
 
-length(trusts[trusts %in% split_orgs]) #40 organisations in our sample period for the beds data split  
+mapping_uncomplicated <- mapping |> 
+  filter(problematic == 0) |> 
+  select(-problematic)
 
+# ADJUSTING LOOKUP FOR SPLITS --------------------------------------------------
+  #clean splits not involved in complicated changes will be coded as 'backwards' mergers 
+mapping_uncomplicated[mapping_uncomplicated$experiences_split == 1, c("old_code", "final_code")] <- 
+  mapping_uncomplicated[mapping_uncomplicated$experiences_split == 1, c("final_code", "old_code")]
+
+write.csv(mapping_uncomplicated, file.path(getwd(), "data/org_changes/trust_lookup_uncomplicated_changes.csv"), row.names = FALSE)
 
 
