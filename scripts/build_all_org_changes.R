@@ -202,6 +202,16 @@ for (i in c(1:3)) {
                                               adjacent_to_complicated == 0, "split_from_multiple", direct_path_complicated))
 }
 
+#and also adjusting for adjacent_to_complicated being a separate, non-complex split where one branch goes into a complex split 
+split_into_complicated <- mapping_only_complicated |> 
+  filter(direct_path_complicated == "split_from_multiple") |> 
+  pull(old_code) |> 
+  unique()
+
+mapping_only_complicated <- mapping_only_complicated |> 
+  mutate(adjacent_to_complicated = ifelse(old_code %in% split_into_complicated & 
+                                            direct_path_complicated == "no", 1, adjacent_to_complicated))
+
 #from this, we know that any trust codes which are not adjacent to complicated AND which don't have a complicated direct path are fine 
 #identifying these for later - these will be splits that are treated as mergers directly 
 not_complicated_splits <- mapping_only_complicated |> 
