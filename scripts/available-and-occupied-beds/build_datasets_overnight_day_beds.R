@@ -461,6 +461,21 @@ beds_0024 <- beds_0024 |>
   select(-org_name) #taking out names temporarily
 beds_0024$year <- as.numeric(beds_0024$year)
 
+#identifying the problematic trusts 
+problematic_trusts <- trust_lookup_uncomplicated |> 
+  filter(problematic == 1)
+
+problematic_trusts <- unique(c(problematic_trusts$old_code, problematic_trusts$final_code)) 
+
+#creating variable to indicate problematic trusts 
+beds_0024 <- beds_0024 |> 
+  mutate(exp_problematic_org_change = ifelse(org_code %in% problematic_trusts, 1, 0))
+
+#removing problematic trusts from lookup 
+trust_lookup_uncomplicated <- trust_lookup_uncomplicated |> 
+  filter(problematic == 0) |> 
+  select(-problematic)
+
 #separating out the affected trusts from beds 
 all_affected_trusts <- unique(c(trust_lookup_uncomplicated$old_code, trust_lookup_uncomplicated$final_code))
 beds_0024_orgchanges <- beds_0024 |> 
@@ -473,6 +488,7 @@ setnames(trust_lookup_uncomplicated, "old_code", "org_code")
 beds_0024_orgchanges <- join(beds_0024_orgchanges, trust_lookup_uncomplicated)
 
 #getting indicator of period where something changed - can merge this back on later
+  #IMPORTANT: this is the period BEFORE the organisational change happens 
 change_indicator <- beds_0024_orgchanges |> 
   filter(!is.na(final_code)) |> 
   group_by(org_code, final_code) |> 
@@ -488,13 +504,25 @@ change_indicator <- beds_0024_orgchanges |>
          org_code = final_code) |> 
   mutate(quarter = ifelse(!is.na(quarter), paste0("Q", quarter), quarter))
 
+#making the date the first period with the new organisational arrangement 
+change_indicator <- change_indicator |> 
+  mutate(year = ifelse(is.na(quarter), year + 1, year))
+
+change_indicator <- change_indicator |> 
+  mutate(date = ifelse(!is.na(quarter), paste0(year, quarter), NA)) |> 
+  mutate(date = yq(date) + months(3)) |> 
+  mutate(quarter = ifelse(!is.na(date), quarter(date), quarter), 
+         year = ifelse(!is.na(date), year(date), year))|> 
+  mutate(quarter = ifelse(!is.na(quarter), paste0("Q", quarter), quarter)) |> 
+  select(-date)
+
 #changing names to final name 
 beds_0024_orgchanges <- beds_0024_orgchanges |> 
   mutate(org_code = ifelse(!is.na(final_code), final_code, org_code))
 
 #aggregating by trust, returning NA still if ALL values are NA 
 beds_0024_orgchanges <- beds_0024_orgchanges |> 
-  group_by(year, quarter, org_code, period_end) |> 
+  group_by(year, quarter, org_code, period_end, exp_problematic_org_change) |> 
   summarise(across(ends_with(c("available", "s_occupied")), ~ifelse(all(is.na(.)), NA, sum(., na.rm=TRUE))))
 
 #adding the percent_occupied variables back in 
@@ -516,9 +544,16 @@ beds_0024 <- rbind(beds_0024, beds_0024_orgchanges) |>
 
 #merging on information on changes and names 
 beds_0024 <- join(beds_0024, name_code_lookup)
+
+#creating new variables 
+  # - unproblematic_org_change to indicate exact period when unproblematic org_change happens 
+  # - exp_unproblematic_org_change to flag trusts that undergo unproblematic org change at some point
 beds_0024 <- join(beds_0024, change_indicator)|> 
-  rename(org_change = experiences_split) |> 
-  mutate(org_change = ifelse(!is.na(org_change), 1, 0))
+  rename(unproblematic_org_change = experiences_split) |> 
+  mutate(unproblematic_org_change = ifelse(!is.na(unproblematic_org_change), 1, 0)) |> 
+  group_by(org_code) |> 
+  mutate(exp_unproblematic_org_change = ifelse(any(unproblematic_org_change == 1), 1, 0))
+  
 
 write.csv(beds_0024, file.path(getwd(), "data/available-and-occupied-beds/overnight_day_beds_2000_24_clean.csv"))
 
