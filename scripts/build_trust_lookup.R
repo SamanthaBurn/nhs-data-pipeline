@@ -52,7 +52,7 @@ successor_changes <- successor_changes |>
   filter(str_length(old_code) == 3)
 
 # LOADING ORG CHANGE DATA  -----------------------------------------------------
-all_org_changes <- read.csv("data/org_changes/all_org_changes_paths_2000_2018.csv")
+all_org_changes <- read.csv("data/org-changes/all_org_changes_paths_2000_2018.csv")
 
 # CREATE MAPPING OF ANY CODE TO FINAL CODE IN 2018 -----------------------------
   #this gives lookup of any code to their final code 
@@ -99,15 +99,13 @@ unproblematic_changes <- all_org_changes |>
 mapping <- join(mapping, unproblematic_changes) |> 
   mutate(problematic = ifelse(is.na(experiences_split), 1, 0))
 
-mapping_uncomplicated <- mapping |> 
-  filter(problematic == 0) |> 
-  select(-problematic)
+mapping_uncomplicated <- mapping 
 
 # ADJUSTING LOOKUP FOR SPLITS --------------------------------------------------
   #clean splits not involved in complicated changes will be coded as 'backwards' mergers 
-mapping_uncomplicated[mapping_uncomplicated$experiences_split == 1, c("old_code", "final_code")] <- 
-  mapping_uncomplicated[mapping_uncomplicated$experiences_split == 1, c("final_code", "old_code")]
+mapping_uncomplicated[mapping_uncomplicated$experiences_split == 1 & mapping_uncomplicated$problematic == 0, c("old_code", "final_code")] <- 
+  mapping_uncomplicated[mapping_uncomplicated$experiences_split == 1  & mapping_uncomplicated$problematic == 0, c("final_code", "old_code")]
 
-write.csv(mapping_uncomplicated, file.path(getwd(), "data/org_changes/trust_lookup_uncomplicated_changes.csv"), row.names = FALSE)
+write.csv(mapping_uncomplicated, file.path(getwd(), "data/org-changes/trust_lookup_uncomplicated_changes.csv"), row.names = FALSE)
 
 
