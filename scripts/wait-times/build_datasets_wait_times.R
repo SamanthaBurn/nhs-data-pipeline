@@ -49,7 +49,7 @@ name_pathway_adjustment <- function(list_element) {
     tolower() |>           
     str_replace_all("nonadmitted", "non_admitted") |> 
     str_replace_all("-", "_")   
-  names_to_change <- setdiff(names(list_element), c("fname", "org_code", "provider_name", "treatment_function_code", "treatment_function", "date"))
+  names_to_change <- setdiff(names(list_element), c("fname", "org_code", "org_name", "treatment_function_code", "treatment_function", "date"))
   new_names <- paste0(pathway, "_", names_to_change)
   
   setnames(list_element, names_to_change, new_names)
@@ -82,6 +82,7 @@ rtt_extraction_jan11_mar13 <- function(filepath, pathway) {
                              function(x) {
                                setnames(x, names(x), make_clean_names(names(x)))
                                setnames(x, "x95th_percentile_waiting_time_in_weeks", "95th_percentile_waiting_time_in_weeks")
+                               setnames(x, "provider_name", "org_name")
                                x <- x |> 
                                  select(-sha_code)
                                })
@@ -115,8 +116,9 @@ rtt_extraction_jan11_mar13 <- function(filepath, pathway) {
   rtt_list_specialties <- lapply(rtt_list_specialties, 
                              function(x) {
                                setnames(x, names(x), make_clean_names(names(x)))
+                               setnames(x, "provider_name", "org_name")
                                old_names <- grep("^x", names(x), value = TRUE)  
-                               new_names <- str_replace(old_names, "^x", "more_than_")
+                               new_names <- str_replace(old_names, "^x", "between_")
                                setnames(x, old_names, new_names)
                                x <- x |> 
                                  select(-sha_code)
@@ -162,9 +164,11 @@ rtt_extraction_apr13_today <- function(filepath, pathway) {
                              function(x) {
                                setnames(x, names(x), make_clean_names(names(x)))
                                setnames(x, "x95th_percentile_waiting_time_in_weeks", "95th_percentile_waiting_time_in_weeks", skip_absent = TRUE)
+                               setnames(x, "x92nd_percentile_waiting_time_in_weeks", "92nd_percentile_waiting_time_in_weeks", skip_absent = TRUE)
                                setnames(x, "provider_code", "org_code")
+                               setnames(x, "provider_name", "org_name")
                                old_names <- grep("^x", names(x), value = TRUE)  
-                               new_names <- str_replace(old_names, "^x", "more_than_")
+                               new_names <- str_replace(old_names, "^x", "between_")
                                setnames(x, old_names, new_names)
                              })
   
@@ -172,11 +176,11 @@ rtt_extraction_apr13_today <- function(filepath, pathway) {
   rtt_list_specialties <- lapply(rtt_list_specialties, 
                                  function(x) {
                                    if ("total_52_plus_weeks" %in% names(x)) {
-                                     more_than_cols <- grep("^more_than_(\\d+_\\d+)$", names(x), value = TRUE)
-                                     to_remove <- more_than_cols[sapply(as.numeric(str_extract(more_than_cols, "(?<=more_than_)\\d+")), function(x) x >= 52)]
+                                     between_cols <- grep("^between_(\\d+_\\d+)$", names(x), value = TRUE)
+                                     to_remove <- between_cols[sapply(as.numeric(str_extract(between_cols, "(?<=between_)\\d+")), function(x) x >= 52)]
                                      x <- x |> 
                                        select(-all_of(to_remove))
-                                     setnames(x, "total_52_plus_weeks", "more_than_52_plus")
+                                     setnames(x, "total_52_plus_weeks", "between_52_plus")
                                      total_cols <- grep("^total_[0-9]|104", names(x), value = TRUE) #removing the other total cols, e.g. more than 62 weeks
                                      x <- x |> 
                                        select(-all_of(total_cols))
@@ -226,5 +230,148 @@ rtt_results_apr13_today <- list()
 for (pathway in pathways) {
   rtt_results_apr13_today[[pathway]] <- rtt_extraction_apr13_today(filepath, pathway)
 }
+
+# LINKING JANUARY 2011 UNTIL TODAY ---------------------------------------------
+rtt_results_jan11_today <- list()
+for (pathway in pathways) {
+  rtt_results_jan11_today[[pathway]] <- rbind(rtt_results_jan11_mar13[[pathway]], rtt_results_apr13_today[[pathway]], fill = TRUE)
+}
+
+# ACCOUNTING FOR ORGANISATIONAL CHANGES ----------------------------------------
+trust_lookup_uncomplicated <- read.csv("data/org-changes/trust_lookup_uncomplicated_changes.csv")
+
+#can deal with the variables on total number of people/people waiting for certain number of weeks 
+#can also deal with percent waiting less than 18 weeks 
+#can get a proxy for median waiting time (though not exact, as data is in bins)
+#cannot account for the percentile variables as data may be missing  
+
+org_change_adjustment <- function(data_list, pathway, lookup_file) {
+  
+  #initialising data
+  org_change_lookup <- lookup_file 
+  data <- data_list[[pathway]]
+  
+  #naming the variables that will be used later 
+  percent_var <- paste0(pathway, "_percent_within_18_weeks")
+  median_var <- paste0(pathway, "_average_median_waiting_time_in_weeks")
+  total_var <- ifelse(
+    pathway == "incomplete", 
+    paste0(pathway, "_total_number_of_", pathway, "_pathways"), 
+    paste0(pathway, "_total_number_of_completed_pathways_all")
+  )
+  
+  
+  #name file, as names will be taken out temporarily 
+  name_code_lookup <- data |> 
+    select(org_code, org_name) |> 
+    unique() |> 
+    group_by(org_code) |> 
+    slice(1)
+  
+  data <- data |> 
+    select(-org_name) #taking out names temporarily
+  
+  data$year <- as.numeric(data$year)
+  
+  #identifying the problematic trusts 
+  problematic_trusts <- org_change_lookup |> 
+    filter(problematic == 1)
+  
+  problematic_trusts <- unique(c(problematic_trusts$old_code, problematic_trusts$final_code)) 
+  
+  #creating variable to indicate problematic trusts 
+  data <- data |> 
+    mutate(exp_problematic_org_change = ifelse(org_code %in% problematic_trusts, 1, 0))
+  
+  #removing problematic trusts from lookup 
+  org_change_lookup <- org_change_lookup |> 
+    filter(problematic == 0) |> 
+    select(-problematic)
+  
+  #separating out the affected trusts from beds 
+  all_affected_trusts <- unique(c(org_change_lookup$old_code, org_change_lookup$final_code))
+  data_orgchanges <- data |> 
+    filter(org_code %in% all_affected_trusts)
+  data <- data |> 
+    filter(org_code %!in% all_affected_trusts)
+  
+  #linking on the changed trusts 
+  setnames(org_change_lookup, "old_code", "org_code")
+  data_orgchanges <- join(data_orgchanges, org_change_lookup)
+  
+  #getting indicator of period where something changed - can merge this back on later
+  change_indicator <- data_orgchanges |> 
+    filter(!is.na(final_code)) |> 
+    group_by(org_code, final_code) |> 
+    mutate(change_date = max(date)) |> 
+    ungroup() |> 
+    select(final_code, change_date, experiences_split) |> 
+    unique() |> 
+    rename(date = change_date, 
+           org_code = final_code)
+
+  #changing codes to final code 
+  data_orgchanges <- data_orgchanges |> 
+    mutate(org_code = ifelse(!is.na(final_code), final_code, org_code))
+  
+  #aggregating by trust, returning NA still if ALL values are NA 
+  data_orgchanges <- data_orgchanges |> 
+    group_by(date, org_code, treatment_function_code, treatment_function, year, exp_problematic_org_change) |> 
+    summarise(across(contains(c("between", "total")), ~ifelse(all(is.na(.)), NA, sum(., na.rm=TRUE))))
+  
+  #making cumulative variables to get percent and median variables 
+  cumulatives <- data_orgchanges |> 
+    pivot_longer(cols = contains("between"), 
+                 values_to = "count") |> 
+    group_by(org_code, treatment_function, date) |> 
+    mutate(count = as.numeric(count), 
+           cum_freq = cumsum(count))
+  
+  #percent_within_18_weeks 
+  cumulatives <- cumulatives |> 
+    mutate(!!percent_var := ifelse(name == "incomplete_between_17_18" & count != 0, 
+                                   cum_freq/!!sym(total_var), NA)) |> 
+    group_by(date, org_code, treatment_function) |> 
+    fill(!!sym(percent_var), .direction = "updown")
+  
+  #median_waits 
+  cumulatives <- cumulatives |> 
+    group_by(date, org_code, treatment_function) |> 
+    mutate(cumulative_percent = cum_freq / !!sym(total_var),  
+           !!median_var := ifelse(cumulative_percent >= 0.5 & lag(cumulative_percent) < 0.5, name, NA)) |> 
+    mutate(!!median_var := ifelse(!is.na(!!sym(median_var)), 
+                                  as.numeric(str_extract(!!sym(median_var), "(?<=_)[0-9]+")) + 0.5, NA)) |> 
+    fill(!!sym(median_var), .direction = "updown")
+  
+  #turning cumulatives into a lookup 
+  cumulatives <- cumulatives |> 
+    select(date, org_code, treatment_function, treatment_function_code, !!sym(percent_var), !!sym(median_var)) |> 
+    distinct()
+  
+  data_orgchanges <- join(data_orgchanges, cumulatives)
+  
+  #linking all back together 
+  data <- rbind(data, data_orgchanges, fill = TRUE) |> 
+    arrange(org_code, treatment_function, date) 
+  
+  #merging on information on changes and names 
+  data <- join(data, name_code_lookup)
+  data <- join(data, change_indicator)|> 
+    rename(org_change = experiences_split) |> 
+    mutate(org_change = ifelse(!is.na(org_change), 1, 0))
+  
+}
+
+for (pathway in pathways) {
+  org_change_adjustment(rtt_results_jan11_today, pathway, trust_lookup_uncomplicated)
+}
+
+
+
+
+
+
+
+
 
 
