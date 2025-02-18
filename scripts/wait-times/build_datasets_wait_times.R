@@ -42,7 +42,7 @@ setwd("/Users/claraschreiner/Desktop/nhs-data-pipeline")
     #the dta doesn't seem to be continued, but the new clock starts appear in new periods datasets later on separately
   #January2013 files are not downloading because they appear to be hosted on an amazon server
 
-# FUNCTION FOR RTT EXTRACTION (OVERALL PROVIDER) -------------------------------
+# FUNCTIONS FOR RTT EXTRACTION (JAN07-DEC10, JAN11-MAR13, APR13-TODAY) ---------
   #function for variable name adjustment to reflect pathway 
 name_pathway_adjustment <- function(list_element) {
   pathway <- str_extract(list_element$fname[1], "(?i)(admitted|non[-_ ]?admitted|incomplete)") |> 
@@ -55,7 +55,154 @@ name_pathway_adjustment <- function(list_element) {
   setnames(list_element, names_to_change, new_names)
 }
 
-  #before April 2013, the files were organised fundamentally differently
+  #function for extraction January 2007 to December 2010
+rtt_extraction_jan07_dec10 <- function(filepath, pathway) {
+  filenames <- list.files(filepath, 
+                          recursive = TRUE, full.names = TRUE)
+  
+  #extract excel sheets, which are called different variations of "Provider" over time
+  rtt_list_summary <- lapply(filenames, 
+                             function(x) {
+                               sheet_name <- excel_sheets(x)[str_detect(excel_sheets(x), regex("^providers?$", ignore_case = TRUE))]
+                               data.table(fname = str_extract(x, "[^/]+$"), 
+                                          read_excel(path = x, sheet = sheet_name, na = c("-", "")))
+                             })
+                               
+  #removing adjusted admitted waiting times (as in later data)
+  rtt_list_summary <- lapply(rtt_list_summary, function(x) 
+    if (any(sapply(1:6, function(i) str_detect(x[i, 2], "The 18 weeks rules|adjusted"))) & 
+        !is.na(any(sapply(1:6, function(i) str_detect(x[i, 2], "The 18 weeks rules|\\badjusted\\b"))))) {
+      return(NULL) 
+    }
+    else 
+    {
+      return(x)
+    })
+  
+  rtt_list_summary <- Filter(Negate(is.null), rtt_list_summary)
+  
+  #adding dates (accounting for different file structures for later datasets)
+  date_pattern <- "\\b(January|February|March|April|May|June|July|August|September|October|November|December)\\s\\d{4}\\b"
+  rtt_list_summary <- lapply(rtt_list_summary, function(x) {
+    if(names(x)[2] == "Title:"){
+      date_found <- str_extract(x[3, 3], date_pattern)
+      date_found <- date_found[!is.na(date_found)]
+      x <- x |> 
+        mutate(date = my(date_found))
+      return(x)
+    }
+    else { 
+      date_found <- sapply(1:2, function(i) str_extract(x[i, 2], date_pattern))
+      date_found <- date_found[!is.na(date_found)]
+      x <- x |> 
+        mutate(date = my(date_found))
+      return(x)
+      }
+  })
+
+  #identifying pathway 
+  rtt_list_summary <- lapply(rtt_list_summary, function(x) {
+    if(names(x)[2] == "Title:"){
+      x <- x |> 
+        mutate(pathway = ifelse(str_detect(x[1, 3], "incomplete"), "incomplete", 
+                                ifelse(str_detect(x[1, 3], "non-admitted"), "non-admitted", "admitted")), 
+               pathway = str_replace_all(pathway, "-", "_"))
+      return(x)
+    }
+    else { 
+      pathway <- sapply(1:2, function(i) ifelse(str_detect(x[i, 2], "incomplete"), "incomplete", 
+                                                ifelse(str_detect(x[i, 2], "non-admitted"), "non-admitted", 
+                                                       ifelse(str_detect(x[i, 2], " admitted"), "admitted", NA))))
+      pathway <- pathway[!is.na(pathway)]
+      x <- x |> 
+        mutate(pathway = pathway, 
+               pathway = str_replace_all(pathway, "-", "_"))
+      return(x)
+    }
+  })
+  
+  #dealing with column names 
+  rtt_list_summary <- lapply(rtt_list_summary, function(x) {
+    x <- x |> 
+      row_to_names(row_number = "find_header")
+    
+    #setting pathway and date names as these disappeared with shifting up rows to be colnames
+    setnames(x, names(x)[1], "fname")
+    setnames(x, names(x)[ncol(x)], "pathway")
+    setnames(x, names(x)[ncol(x) - 1], "date")
+    
+    #cleaning names overall
+    setnames(x, names(x), make_clean_names(names(x)))
+    
+    #cleaning specific names which might differ among datasets 
+    setnames(x, "x95th_percentile_waiting_time_in_weeks", "95th_percentile_waiting_time_in_weeks", skip_absent = TRUE)
+    setnames(x, "x92nd_percentile_waiting_time_in_weeks", "92nd_percentile_waiting_time_in_weeks", skip_absent = TRUE)
+    setnames(x, "code", "org_code", skip_absent = TRUE)
+    setnames(x, "provider", "provider_name", skip_absent = TRUE)
+    setnames(x, "provider_code", "org_code", skip_absent = TRUE)
+    setnames(x, "provider_name", "org_name", skip_absent = TRUE)
+    setnames(x, "total_known_clock_start", "total_number_of_completed_pathways_with_a_known_clock_start", skip_absent = TRUE)
+    setnames(x, "total_known_clock_start_within_18_weeks", "total_with_a_known_clock_start_within_18_weeks", skip_absent = TRUE)
+    setnames(x, "percent_within_18_weeks_column_bj_column_bi", "percent_within_18_weeks", skip_absent = TRUE)
+    setnames(x, "percent_within_18_weeks_column_bi_column_bh", "percent_within_18_weeks", skip_absent = TRUE)
+    setnames(x, "percent_within_18_weeks_column_bh_column_bg", "percent_within_18_weeks", skip_absent = TRUE)
+    setnames(x, "sha", "sha_code", skip_absent = TRUE)
+
+    #unique difference for november 2011 and incomplete
+    if (unique(x$pathway) == "incomplete" & "total_with_a_known_clock_start_within_18_weeks" %in% names(x)) {
+      setnames(x, "total_with_a_known_clock_start_within_18_weeks", "total_within_18_weeks")
+    }
+    
+    #total variable depending on the pathway 
+    if (unique(x$pathway) == "incomplete" & "total_all" %in% names(x)) {
+      setnames(x, "total_all", "total_number_of_incomplete_pathways", skip_absent = TRUE)
+    }
+    else {
+      setnames(x, "total_all", "total_number_of_completed_pathways_all", skip_absent = TRUE)
+    }
+    
+    
+    #removing sha_code 
+    x <- x |> 
+      select(-sha_code)
+    
+    #fixing range names
+    old_names <- grep("^x", names(x), value = TRUE)  
+    new_names <- str_replace(old_names, "^x", "between_")
+    setnames(x, old_names, new_names)
+  })
+  
+  #renaming columns based on pathway 
+  rtt_list_summary <- lapply(rtt_list_summary, function(x) { 
+    pathway <- unique(x$pathway)
+    names_to_change <- setdiff(names(x), c("fname", "org_code", "org_name", "treatment_function_code", "treatment_function", "date", "pathway"))
+    new_names <- paste0(pathway, "_", names_to_change)
+    setnames(x, names_to_change, new_names)
+    })
+  
+  #sorting into separate lists based on pathways 
+  pathways <- c("admitted", "non_admitted", "incomplete")
+  rtt_results_jan07_dec10 <- list()
+  
+  for (pathway in pathways){
+    rtt_results_jan07_dec10[[pathway]] <- list()
+  }
+  
+  for (i in 1:(length(rtt_list_summary))) {
+    pathway <- unique(rtt_list_summary[[i]]$pathway)
+    rtt_results_jan07_dec10[[pathway]] <- rbind(rtt_results_jan07_dec10[[pathway]], rtt_list_summary[[i]], fill = TRUE)
+  }
+  
+  #removing pathway variable
+  rtt_results_jan07_dec10 <- lapply(rtt_results_jan07_dec10, function(x) {
+    x <- x |> 
+      select(-pathway)
+    return(x)
+    })
+}
+  
+    
+  #between January 2011 and March 2013, the files were organised fundamentally differently
     ##provider summary data in one sheet; provider specialty data with other variables in another sheet
     ##function for extraction before April 2013
 rtt_extraction_jan11_mar13 <- function(filepath, pathway) {
