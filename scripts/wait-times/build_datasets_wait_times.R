@@ -53,10 +53,11 @@ name_pathway_adjustment <- function(list_element) {
   new_names <- paste0(pathway, "_", names_to_change)
   
   setnames(list_element, names_to_change, new_names)
+
 }
 
   #function for extraction January 2007 to December 2010
-rtt_extraction_jan07_dec10 <- function(filepath, pathway) {
+rtt_extraction_jan07_dec10 <- function(filepath) {
   filenames <- list.files(filepath, 
                           recursive = TRUE, full.names = TRUE)
   
@@ -147,7 +148,7 @@ rtt_extraction_jan07_dec10 <- function(filepath, pathway) {
     setnames(x, "percent_within_18_weeks_column_bi_column_bh", "percent_within_18_weeks", skip_absent = TRUE)
     setnames(x, "percent_within_18_weeks_column_bh_column_bg", "percent_within_18_weeks", skip_absent = TRUE)
     setnames(x, "sha", "sha_code", skip_absent = TRUE)
-
+  
     #unique difference for november 2011 and incomplete
     if (unique(x$pathway) == "incomplete" & "total_with_a_known_clock_start_within_18_weeks" %in% names(x)) {
       setnames(x, "total_with_a_known_clock_start_within_18_weeks", "total_within_18_weeks")
@@ -161,7 +162,6 @@ rtt_extraction_jan07_dec10 <- function(filepath, pathway) {
       setnames(x, "total_all", "total_number_of_completed_pathways_all", skip_absent = TRUE)
     }
     
-    
     #removing sha_code 
     x <- x |> 
       select(-sha_code)
@@ -170,14 +170,38 @@ rtt_extraction_jan07_dec10 <- function(filepath, pathway) {
     old_names <- grep("^x", names(x), value = TRUE)  
     new_names <- str_replace(old_names, "^x", "between_")
     setnames(x, old_names, new_names)
-  })
+})
   
+  #adjusting the percent variable to be NA, not 0, if all other variables are 0
+  rtt_list_summary <- lapply(rtt_list_summary, function(x) { 
+    if (unique(x$pathway) == "incomplete" & "percent_within_18_weeks" %in% names(x)) { 
+      x <- x |> 
+        mutate(percent_within_18_weeks = ifelse(total_number_of_incomplete_pathways == 0 & percent_within_18_weeks == 0, 
+                                                NA, percent_within_18_weeks))
+    }
+    else if (unique(x$pathway) != "incomplete" & "percent_within_18_weeks" %in% names(x)) {
+      x <- x |> 
+        mutate(percent_within_18_weeks = ifelse(total_number_of_completed_pathways_all == 0 & percent_within_18_weeks == 0, 
+                                                NA, percent_within_18_weeks))
+      
+    }
+    else {
+      x <- x
+    }
+    })
+
   #renaming columns based on pathway 
   rtt_list_summary <- lapply(rtt_list_summary, function(x) { 
     pathway <- unique(x$pathway)
     names_to_change <- setdiff(names(x), c("fname", "org_code", "org_name", "treatment_function_code", "treatment_function", "date", "pathway"))
     new_names <- paste0(pathway, "_", names_to_change)
     setnames(x, names_to_change, new_names)
+    
+    for (name in new_names) {
+      x[[name]] <- as.numeric(x[[name]])
+    }
+    
+    return(x)
     })
   
   #sorting into separate lists based on pathways 
@@ -199,8 +223,9 @@ rtt_extraction_jan07_dec10 <- function(filepath, pathway) {
       select(-pathway)
     return(x)
     })
-}
   
+  rtt_results_jan07_dec10
+}
     
   #between January 2011 and March 2013, the files were organised fundamentally differently
     ##provider summary data in one sheet; provider specialty data with other variables in another sheet
@@ -357,9 +382,13 @@ rtt_extraction_apr13_today <- function(filepath, pathway) {
   rtt_specialties
 }
 
+# EXTRACTING AND CLEANING RTT DATA (JANUARY 2007 UNTIL DECEMBER 2010) ----------
+filepath <- file.path(getwd(), "rawdata/wait-times/before-2011")
 
-# EXTRACTING AND CLEANING RTT DATA (JANUARY 2011 UNTIL MARCH 2013) -------------
-filepath <- file.path(getwd(), "rawdata/wait-times")
+rtt_results_jan07_dec10 <- rtt_extraction_jan07_dec10(filepath)
+
+ # EXTRACTING AND CLEANING RTT DATA (JANUARY 2011 UNTIL MARCH 2013) -------------
+filepath <- file.path(getwd(), "rawdata/wait-times/after-2011")
 pathways <- c("admitted", "non_admitted", "incomplete")
 
   #creating list of results by waits pathway 
@@ -369,7 +398,7 @@ for (pathway in pathways) {
 }
 
 # EXTRACTING AND CLEANING RTT DATA (APRIL 2013 UNTIL TODAY) --------------------
-filepath <- file.path(getwd(), "rawdata/wait-times")
+filepath <- file.path(getwd(), "rawdata/wait-times/after-2011")
 pathways <- c("admitted", "non_admitted", "incomplete")
 
 #creating list of results by waits pathway 
@@ -378,11 +407,20 @@ for (pathway in pathways) {
   rtt_results_apr13_today[[pathway]] <- rtt_extraction_apr13_today(filepath, pathway)
 }
 
-# LINKING JANUARY 2011 UNTIL TODAY ---------------------------------------------
-rtt_results_jan11_today <- list()
+# LINKING JANUARY 2007 UNTIL TODAY ---------------------------------------------
+rtt_results_jan07_today <- list()
 for (pathway in pathways) {
-  rtt_results_jan11_today[[pathway]] <- rbind(rtt_results_jan11_mar13[[pathway]], rtt_results_apr13_today[[pathway]], fill = TRUE)
-}
+  rtt_results_jan07_today[[pathway]] <- rbind(rtt_results_jan07_dec10[[pathway]], rtt_results_jan11_mar13[[pathway]], fill = TRUE)
+  rtt_results_jan07_today[[pathway]] <- rbind(rtt_results_jan07_today[[pathway]], rtt_results_apr13_today[[pathway]], fill = TRUE)
+  
+  #removing average median waiting time in weeks and 95th percentile, which are missing in most cases anyways 
+  rtt_results_jan07_today[[pathway]] <- rtt_results_jan07_today[[pathway]] |> 
+    select(!contains("average_median_waiting_time")) |> 
+    select(!contains("95th_percentile")) |> 
+    select(!contains("92nd_percentile")) |> 
+    select(!fname)
+  }
+
 
 # ACCOUNTING FOR ORGANISATIONAL CHANGES ----------------------------------------
 trust_lookup_uncomplicated <- read.csv("data/org-changes/trust_lookup_uncomplicated_changes.csv")
@@ -407,7 +445,6 @@ org_change_adjustment <- function(data_list, pathway, lookup_file) {
     paste0(pathway, "_total_number_of_completed_pathways_all")
   )
   
-  
   #name file, as names will be taken out temporarily 
   name_code_lookup <- data |> 
     select(org_code, org_name) |> 
@@ -417,8 +454,6 @@ org_change_adjustment <- function(data_list, pathway, lookup_file) {
   
   data <- data |> 
     select(-org_name) #taking out names temporarily
-  
-  data$year <- as.numeric(data$year)
   
   #identifying the problematic trusts 
   problematic_trusts <- org_change_lookup |> 
@@ -507,10 +542,25 @@ org_change_adjustment <- function(data_list, pathway, lookup_file) {
     rename(org_change = experiences_split) |> 
     mutate(org_change = ifelse(!is.na(org_change), 1, 0))
   
+  data
 }
 
+rtt_results_jan07_today_orgadjusted <- list()
+
 for (pathway in pathways) {
-  org_change_adjustment(rtt_results_jan11_today, pathway, trust_lookup_uncomplicated)
+  rtt_results_jan07_today_orgadjusted[[pathway]] <- org_change_adjustment(rtt_results_jan07_today, pathway, trust_lookup_uncomplicated)
+}
+
+#OUTPUT RTT DATA BY PATHWAY ----------------------------------------------------
+for (pathway in pathways) {
+  #turn all character variables into doubles to save space 
+  char_cols <- sapply(rtt_results_jan07_today_orgadjusted[[pathway]], is.character)
+  for (name in names(rtt_results_jan07_today_orgadjusted[[pathway]])[char_cols]) {
+    rtt_results_jan07_today_orgadjusted[[pathway]][[name]] <- factor(rtt_results_jan07_today_orgadjusted[[pathway]][[name]])
+  }
+  
+  #output
+  write.csv(rtt_results_jan07_today_orgadjusted[[pathway]], file.path(getwd(), paste0("data/wait-times/rtt_", pathway, "_jan07_today.csv")), row.names = FALSE)
 }
 
 
