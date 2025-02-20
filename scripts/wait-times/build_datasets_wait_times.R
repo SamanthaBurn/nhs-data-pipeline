@@ -482,10 +482,13 @@ org_change_adjustment <- function(data_list, pathway, lookup_file) {
   data_orgchanges <- join(data_orgchanges, org_change_lookup)
   
   #getting indicator of period where something changed - can merge this back on later
+  #and turn it into first period with new arrangement, rather than date of period before change
+    #unless it is a split
   change_indicator <- data_orgchanges |> 
     filter(!is.na(final_code)) |> 
     group_by(org_code, final_code) |> 
     mutate(change_date = max(date)) |> 
+    mutate(change_date = ifelse(experiences_split == 0, change_date + months(1), change_date)) |> 
     ungroup() |> 
     select(final_code, change_date, experiences_split) |> 
     unique() |> 
