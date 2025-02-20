@@ -506,10 +506,10 @@ change_indicator <- beds_0024_orgchanges |>
 
 #making the date the first period with the new organisational arrangement 
 change_indicator <- change_indicator |> 
-  mutate(year = ifelse(is.na(quarter), year + 1, year))
+  mutate(year = ifelse(is.na(quarter) & experiences_split == 0, year + 1, year))
 
 change_indicator <- change_indicator |> 
-  mutate(date = ifelse(!is.na(quarter), paste0(year, quarter), NA)) |> 
+  mutate(date = ifelse(!is.na(quarter) & experiences_split == 0, paste0(year, quarter), NA)) |> 
   mutate(date = yq(date) + months(3)) |> 
   mutate(quarter = ifelse(!is.na(date), quarter(date), quarter), 
          year = ifelse(!is.na(date), year(date), year))|> 
@@ -555,7 +555,7 @@ beds_0024 <- join(beds_0024, change_indicator)|>
   mutate(exp_unproblematic_org_change = ifelse(any(unproblematic_org_change == 1), 1, 0))
   
 
-write.csv(beds_0024, file.path(getwd(), "data/available-and-occupied-beds/overnight_day_beds_2000_24_clean.csv"))
+write.csv(beds_0024, file.path(getwd(), "data/available-and-occupied-beds/overnight_day_beds_2000_24_clean.csv"), row.names = FALSE)
 
 # SOME NOTES ON THIS -----------------------------------------------------------
 # - sometimes not all trusts have day beds available; in this case, they are coded as NA rather than as 0
