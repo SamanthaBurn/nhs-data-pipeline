@@ -435,13 +435,13 @@ day_beds_1024_cleaned <- bed_data_cleaning_1024(day_beds_1024_uncleaned, filepat
 beds_0010 <- join(overnight_beds_0010_cleaned, day_beds_0010_cleaned) |> 
   arrange(org_code, year) 
 
-write.csv(beds_0010, file.path(getwd(), "data/available-and-occupied-beds/overnight_day_beds_2000_10_clean.csv"))
+write.csv(beds_0010, file.path(getwd(), "data/available-and-occupied-beds/overnight_day_beds_2000_10_clean.csv"), row.names = FALSE)
 
 # LINKING AND OUTPUTTING DAY AND OVERNIGHT BEDS DATA 2010 - 2024 ---------------
 beds_1024 <- join(overnight_beds_1024_cleaned, day_beds_1024_cleaned) |> 
   arrange(org_code, year, quarter)
 
-write.csv(beds_1024, file.path(getwd(), "data/available-and-occupied-beds/overnight_day_beds_2010_24_clean.csv"))
+write.csv(beds_1024, file.path(getwd(), "data/available-and-occupied-beds/overnight_day_beds_2010_24_clean.csv"), row.names = FALSE)
 
 # LINKING BEDS DATA 2000 - 2024, ACCOUNTING FOR ORG CHANGES AND OUTPUTTING------
 beds_0024 <- rbind(beds_1024, beds_0010, fill = TRUE) |> 
