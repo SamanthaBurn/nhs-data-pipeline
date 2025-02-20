@@ -1,4 +1,4 @@
-########### CLEANING OVERNIGHT AND DAY BEDS NHS CAPACITY DATA ##################
+########### CLEANING CRITICAL CARE BEDS NHS CAPACITY DATA ######################
 
 # PACKAGES AND WORKING DIRECTORY ------------------------------------------------
 library(sf)
